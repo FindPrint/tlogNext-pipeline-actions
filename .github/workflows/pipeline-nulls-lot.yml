@@ -13,6 +13,11 @@
 # Matrice : 8 paires x 19 blocs de 10 graines = 152 jobs, max-parallel 15
 # (limite Free documentee : 20 jobs concurrents, docs GitHub "Actions
 # limits"). fail-fast false : un job en echec n'arrete pas le lot.
+# CORRECTION 22 nov. 2026 (run #1 : seules les 19 taches depmap ont existe) :
+# `pair` DOIT etre une dimension de la matrice. Avec les paires uniquement
+# dans `include:` sans `block`, chaque entree s'appliquait aux 19 blocs et
+# la derniere (depmap) ecrasait les 7 autres. Avec `pair` en dimension,
+# chaque entree `include:` ne s'applique qu'aux combinaisons de sa paire.
 # Chaque job : 10 runs v6.2 fast sequentiels (~10-25 min, HP35 ~70 min),
 # timeout 120 min (limite GitHub par job : 6 h).
 # Les nuls sont REGENERES sur le runner par scripts/build_null_893.py
@@ -41,6 +46,7 @@ jobs:
       fail-fast: false
       max-parallel: 15
       matrix:
+        pair: [hp35, tcga_v4, geo71729, geo62452, icgc, immune_tcga, parp_tcga, depmap]
         block: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
         include:
           - pair: hp35
