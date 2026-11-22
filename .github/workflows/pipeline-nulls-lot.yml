@@ -1,0 +1,117 @@
+# LOT SUIVANT §8.93 — nuls frais, double piste (moitie GitHub).
+# Declenchement MANUEL UNIQUEMENT (workflow_dispatch) — jamais automatique.
+# Ne jamais declencher sans le go de Zackary (publication du lot en cours
+# d'abord, puis ce lot). Voir README.md dans nulls_lot_next/ (dossier local).
+#
+# Perimetre (PROPOSITION — le protocole gele §8.93 ne definit pas de lot
+# suivant) : 190 nuls frais supplementaires par paire, graines 9111-9300,
+# pour passer de 10 a 200 nuls frais par paire (cible §8.53).
+# Moitie GitHub = E1, 8 paires principales : 1520 runs.
+# Moitie locale = E2, 7 paires A2 restantes : 1330 runs (lanceur parallele).
+# Coupure par paires ENTIERES : aucune graine recouvrante entre les pistes.
+#
+# Matrice : 8 paires x 19 blocs de 10 graines = 152 jobs, max-parallel 15
+# (limite Free documentee : 20 jobs concurrents, docs GitHub "Actions
+# limits"). fail-fast false : un job en echec n'arrete pas le lot.
+# Chaque job : 10 runs v6.2 fast sequentiels (~10-25 min, HP35 ~70 min),
+# timeout 120 min (limite GitHub par job : 6 h).
+# Les nuls sont REGENERES sur le runner par scripts/build_null_893.py
+# (regle gelee : default_rng(graine), permutation des lignes, colonne de
+# controle inchangee) a partir du CSV reel — meme script, meme graine,
+# meme reel = meme nul que le local, octet a octet.
+# Artefacts : seuls les master_results.json, gzippes, retention 7 jours,
+# un artefact par job. Volume estime ~150-300 Mo au total (limite Free :
+# 500 Mo). Minutes illimitees sur depot public (docs GitHub).
+#
+# PREREQUIS avant le premier declenchement (a pousser sur main) :
+#   - les 8 CSV reels E1 dans data/ (TCGA v4 deja present ; les 7 autres
+#     sont listes dans README.md du lot, avec leurs SHA-256) ;
+#   - scripts/build_null_893.py (meme fichier que le local).
+# Le workflow VERIFIE les SHA du pipeline et du CSV reel avant de tourner.
+name: pipeline-nulls-lot-893
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nulls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        block: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        include:
+          - pair: hp35
+            base: test_biophysique_input
+            real_sha: 6b656540598579a37cbc97c9dfbee26bf6186611f84f397cf9e7e6f1e88bb35e
+          - pair: tcga_v4
+            base: pdac_tcga_fluxes_v4
+            real_sha: e7a2adaba5a0ef6858b665251d56d40a26eb9edd116370bf2c686c752213a0b0
+          - pair: geo71729
+            base: pdac_geo71729_fluxes
+            real_sha: 7d69fa888f15e9a1a128e149e35f9eeacac106198c33929dfc51e113ee8c0cf1
+          - pair: geo62452
+            base: pdac_geo62452_fluxes
+            real_sha: d7419c0ec3ed649d98ba920411ef5f41a056caa69b38c6b9a5e3ab702cc03abf
+          - pair: icgc
+            base: pdac_icgc_fluxes
+            real_sha: 710d41e55d32360b95f81113579eac4b6de023130b77410bd9ac3df906b61941
+          - pair: immune_tcga
+            base: pdac_immune_tcga_fluxes
+            real_sha: 66dbb672ea2a305ea67b51be3f9522a47e5003425f271c9cc4f42bc0427bbd2e
+          - pair: parp_tcga
+            base: pdac_tcga_fluxes_parp
+            real_sha: c9549b68280b2f4ca3d9b62020efa21ab97249b10e176de87ec528a0258c4309
+          - pair: depmap
+            base: pdac_depmap_fluxes
+            real_sha: 7d605fefb412fe16151a1b2508dffa6a1c2b8353600dccffd4af3333198e37f8
+
+    steps:
+      - name: Récupérer main
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances (versions épinglées = versions locales)
+        run: pip install numpy==1.26.4 pandas==2.1.4 scipy==1.11.4 matplotlib==3.6.3 seaborn==0.13.2
+
+      - name: Vérifier les empreintes SHA-256 des entrées
+        run: |
+          echo "v6.2 attendu : f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf"
+          echo "${{ matrix.base }} attendu : ${{ matrix.real_sha }}"
+          echo "f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf  universal_v6.2.0_cohen.py" | sha256sum -c -
+          echo "${{ matrix.real_sha }}  data/${{ matrix.base }}.csv" | sha256sum -c -
+          test -f scripts/build_null_893.py || { echo "MANQUANT : scripts/build_null_893.py (prerequis, voir README du lot)"; exit 1; }
+
+      - name: Calculer la plage de graines du bloc
+        run: |
+          FIRST=$((9111 + ${{ matrix.block }} * 10))
+          LAST=$((FIRST + 9))
+          echo "FIRST_SEED=$FIRST" >> "$GITHUB_ENV"
+          echo "LAST_SEED=$LAST" >> "$GITHUB_ENV"
+          echo "Paire ${{ matrix.pair }}, bloc ${{ matrix.block }}, graines $FIRST-$LAST"
+
+      - name: Construire et lancer les 10 nuls du bloc (v6.2 fast)
+        run: |
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            SEED=$((FIRST_SEED + i))
+            python3 scripts/build_null_893.py --real "data/${{ matrix.base }}.csv" --seed "$SEED" --out "data/${{ matrix.base }}_nul_s${SEED}.csv"
+            python3 universal_v6.2.0_cohen.py --input "data/${{ matrix.base }}_nul_s${SEED}.csv" --mode fast --output "results_fast_gha_893_${{ matrix.pair }}_nul_s${SEED}"
+          done
+          ls results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json | wc -l
+
+      - name: Compresser les master_results.json
+        run: gzip -k results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json
+
+      - name: Déposer les master_results.json en artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nulls-893-${{ matrix.pair }}-s${{ env.FIRST_SEED }}-s${{ env.LAST_SEED }}
+          path: results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json.gz
+          retention-days: 7
+          if-no-files-found: error
