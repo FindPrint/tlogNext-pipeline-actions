@@ -1,0 +1,50 @@
+# TEST MANUEL UNIQUEMENT — expérience GitHub Actions, 22 nov. 2026.
+# Ne se déclenche JAMAIS automatiquement (workflow_dispatch seulement).
+# Fait tourner le pipeline v6.2 (inchangé, SHA-256 f07567c4…) en mode fast
+# sur UNE petite paire : TCGA-PAAD v4 réel + nul (178 tumeurs, 12 flux).
+# Dépose les deux master_results.json en artefacts, pour comparaison
+# octet à octet avec les mêmes runs locaux.
+# Branche : actions-test (FindPrint/Code). Ne touche pas à main.
+# Runners standards gratuits sur dépôt public (docs GitHub : usage libre).
+name: pipeline-smoke-test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Récupérer la branche actions-test
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances (versions épinglées = versions locales)
+        run: pip install numpy==1.26.4 pandas==2.1.4 scipy==1.11.4 matplotlib==3.6.3 seaborn==0.13.2
+
+      - name: Vérifier les empreintes SHA-256 des entrées
+        run: |
+          sha256sum universal_v6.2.0_cohen.py data/pdac_tcga_fluxes_v4.csv data/pdac_tcga_fluxes_v4_nul.csv
+          echo "Attendu v6.2 : f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf"
+          echo "Attendu v4 réel : e7a2adaba5a0ef6858b665251d56d40a26eb9edd116370bf2c686c752213a0b0"
+          echo "Attendu v4 nul : 895a456295d2b0553a2a62910461aedecb1aeccca59f57751c87b75ce0b97da4"
+
+      - name: Run réel TCGA v4 (mode fast)
+        run: python3 universal_v6.2.0_cohen.py --input data/pdac_tcga_fluxes_v4.csv --mode fast --output results_fast_gha_tcga_v4
+
+      - name: Run nul TCGA v4 (mode fast)
+        run: python3 universal_v6.2.0_cohen.py --input data/pdac_tcga_fluxes_v4_nul.csv --mode fast --output results_fast_gha_tcga_v4_nul
+
+      - name: Déposer les master_results.json en artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-results-tcga-v4
+          path: |
+            results_fast_gha_tcga_v4/master_results.json
+            results_fast_gha_tcga_v4_nul/master_results.json
+          if-no-files-found: error
