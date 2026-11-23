@@ -1,0 +1,99 @@
+# LOT SUIVANT §8.93 — SCISSION E2 (23 nov. 2026, go de Zackary).
+# Declenchement MANUEL UNIQUEMENT (workflow_dispatch) — jamais automatique.
+# 3 paires de la moitie locale E2 basculees sur GitHub parce que la piste
+# GitHub etait inactive depuis la fin du run #3 (22 nov. 22:20) et que le
+# local avait encore ~600 runs devant lui. Decoupage par paires ENTIERES :
+# aucune graine recouvrante entre les pistes. Le local garde yeh_ff
+# (11 runs restants au moment de la scission) ; jobs_local_e2.txt reduit
+# a 760 jobs, ledger.csv mis a jour (570 lignes -> GitHub, dossiers
+# results_fast_gha_893_), gardien local NJOBS 1330 -> 760.
+#
+# Matrice : 3 paires x 19 blocs de 10 graines = 57 jobs, max-parallel 15.
+# Chaque job : 10 runs v6.2 fast sequentiels, timeout 360 min (marge large ;
+# ces paires sont petites, n <= 63, blocs attendus < 30 min — le 360 vient
+# de la lecon HP35 du run #2, ou 120 min n'a pas suffi).
+# Les nuls sont REGENERES sur le runner par scripts/build_null_893.py
+# (regle gelee : default_rng(graine), permutation des lignes, colonne de
+# controle inchangee) a partir du CSV reel — meme script, meme graine,
+# meme reel = meme nul que le local, octet a octet.
+# Artefacts : seuls les master_results.json, gzippes, retention 7 jours,
+# un artefact par job, nom nulls-893-<paire>-s<prem>-s<dern> (meme forme
+# que le lot E1, pour que le telechargement de fin de lot soit identique).
+#
+# PREREQUIS avant le premier declenchement (a pousser sur main) :
+#   - les 3 CSV reels dans data/ (avec leurs SHA-256 ci-dessous) ;
+#   - scripts/build_null_893.py (deja sur main depuis le lot E1).
+# Le workflow VERIFIE les SHA du pipeline et du CSV reel avant de tourner.
+name: pipeline-nulls-lot-893-e2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nulls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        pair: [geo57495, gdc_organoid, gse194249]
+        block: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        include:
+          - pair: geo57495
+            base: pdac_879_geo57495_fluxes
+            real_sha: 224f98eb9cc7092e05b490b1e053edd14793e3def147890be0bab567630bb51c
+          - pair: gdc_organoid
+            base: pdac_885_gdc_organoid_fluxes
+            real_sha: a83b98175bdbc33525ba8a175aa898504d2cc44125b891d0902c6c6c26345eaf
+          - pair: gse194249
+            base: pdac_888_gse194249_fluxes
+            real_sha: 7799a62a6c1145b728e60a2d1126a93b86c28123744c0dc904e454c35ae9aeda
+
+    steps:
+      - name: Récupérer main
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances (versions épinglées = versions locales)
+        run: pip install numpy==1.26.4 pandas==2.1.4 scipy==1.11.4 matplotlib==3.6.3 seaborn==0.13.2
+
+      - name: Vérifier les empreintes SHA-256 des entrées
+        run: |
+          echo "v6.2 attendu : f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf"
+          echo "${{ matrix.base }} attendu : ${{ matrix.real_sha }}"
+          echo "f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf  universal_v6.2.0_cohen.py" | sha256sum -c -
+          echo "${{ matrix.real_sha }}  data/${{ matrix.base }}.csv" | sha256sum -c -
+          test -f scripts/build_null_893.py || { echo "MANQUANT : scripts/build_null_893.py (prerequis, voir README du lot)"; exit 1; }
+
+      - name: Calculer la plage de graines du bloc
+        run: |
+          FIRST=$((9111 + ${{ matrix.block }} * 10))
+          LAST=$((FIRST + 9))
+          echo "FIRST_SEED=$FIRST" >> "$GITHUB_ENV"
+          echo "LAST_SEED=$LAST" >> "$GITHUB_ENV"
+          echo "Paire ${{ matrix.pair }}, bloc ${{ matrix.block }}, graines $FIRST-$LAST"
+
+      - name: Construire et lancer les 10 nuls du bloc (v6.2 fast)
+        run: |
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            SEED=$((FIRST_SEED + i))
+            python3 scripts/build_null_893.py --real "data/${{ matrix.base }}.csv" --seed "$SEED" --out "data/${{ matrix.base }}_nul_s${SEED}.csv"
+            python3 universal_v6.2.0_cohen.py --input "data/${{ matrix.base }}_nul_s${SEED}.csv" --mode fast --output "results_fast_gha_893_${{ matrix.pair }}_nul_s${SEED}"
+          done
+          ls results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json | wc -l
+
+      - name: Compresser les master_results.json
+        run: gzip -k results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json
+
+      - name: Déposer les master_results.json en artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nulls-893-${{ matrix.pair }}-s${{ env.FIRST_SEED }}-s${{ env.LAST_SEED }}
+          path: results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json.gz
+          retention-days: 7
+          if-no-files-found: error
