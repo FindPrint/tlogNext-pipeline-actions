@@ -1,0 +1,80 @@
+# RELANCE — Lot suivant §8.93, blocs manquants du run GitHub #2.
+# MATRICE VERIFIEE COMPLETE le 22 nov. 2026 19:13 EST : run #2 termine,
+# 146/152 jobs reussis, seuls manquants = ces 6 blocs HP35 (delai 2 h
+# atteint). Aucune autre paire touchee. Declenchement avec le go de Zackary
+# (16:49) : attendre la fin du run #2, puis relancer avec un delai de 6 h.
+# Différence avec le workflow principal : timeout 360 min (6 h, maximum
+# GitHub) au lieu de 120 — les blocs HP35 de 10 runs frôlent les 2 h sur
+# les runners GitHub. Tout le reste est identique (même script de
+# construction des nuls, mêmes graines, mêmes entrées, mêmes vérifications
+# SHA) : un bloc refait donne les mêmes résultats que s'il avait réussi
+# dans le run #2. Artefacts : même nommage nulls-893-<paire>-s<début>-s<fin>,
+# rétention 7 jours.
+# Déclenchement MANUEL UNIQUEMENT (workflow_dispatch), avec le go de Zackary.
+name: pipeline-nulls-lot-893-rerun
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nulls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        pair: [hp35]
+        block: [2, 5, 7, 8, 14, 17]
+        include:
+          - pair: hp35
+            base: test_biophysique_input
+            real_sha: 6b656540598579a37cbc97c9dfbee26bf6186611f84f397cf9e7e6f1e88bb35e
+
+    steps:
+      - name: Récupérer main
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances (versions épinglées = versions locales)
+        run: pip install numpy==1.26.4 pandas==2.1.4 scipy==1.11.4 matplotlib==3.6.3 seaborn==0.13.2
+
+      - name: Vérifier les empreintes SHA-256 des entrées
+        run: |
+          echo "v6.2 attendu : f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf"
+          echo "${{ matrix.base }} attendu : ${{ matrix.real_sha }}"
+          echo "f07567c48a5625060c6c4dd7dbed3dd2df915b5c24c91ed6e8a4b735e5ec3abf  universal_v6.2.0_cohen.py" | sha256sum -c -
+          echo "${{ matrix.real_sha }}  data/${{ matrix.base }}.csv" | sha256sum -c -
+          test -f scripts/build_null_893.py || { echo "MANQUANT : scripts/build_null_893.py (prerequis, voir README du lot)"; exit 1; }
+
+      - name: Calculer la plage de graines du bloc
+        run: |
+          FIRST=$((9111 + ${{ matrix.block }} * 10))
+          LAST=$((FIRST + 9))
+          echo "FIRST_SEED=$FIRST" >> "$GITHUB_ENV"
+          echo "LAST_SEED=$LAST" >> "$GITHUB_ENV"
+          echo "Paire ${{ matrix.pair }}, bloc ${{ matrix.block }}, graines $FIRST-$LAST"
+
+      - name: Construire et lancer les 10 nuls du bloc (v6.2 fast)
+        run: |
+          for i in 0 1 2 3 4 5 6 7 8 9; do
+            SEED=$((FIRST_SEED + i))
+            python3 scripts/build_null_893.py --real "data/${{ matrix.base }}.csv" --seed "$SEED" --out "data/${{ matrix.base }}_nul_s${SEED}.csv"
+            python3 universal_v6.2.0_cohen.py --input "data/${{ matrix.base }}_nul_s${SEED}.csv" --mode fast --output "results_fast_gha_893_${{ matrix.pair }}_nul_s${SEED}"
+          done
+          ls results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json | wc -l
+
+      - name: Compresser les master_results.json
+        run: gzip -k results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json
+
+      - name: Déposer les master_results.json en artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nulls-893-${{ matrix.pair }}-s${{ env.FIRST_SEED }}-s${{ env.LAST_SEED }}
+          path: results_fast_gha_893_${{ matrix.pair }}_nul_s*/master_results.json.gz
+          retention-days: 7
+          if-no-files-found: error
